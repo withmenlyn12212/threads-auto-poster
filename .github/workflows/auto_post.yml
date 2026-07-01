@@ -1,11 +1,15 @@
-name: 스레드 자동 포스팅
+# GitHub Actions — PC 꺼도 자동 실행되는 스케줄러
+# 저장 위치: .github/workflows/auto_post.yml
+# 텍스트 포스팅: 매일 오전 8시, 저녁 8시 (한국시간)
+# 만화 포스팅: comic_post.yml 에서 낮 12시에 별도 실행
+
+name: 스레드 텍스트 포스팅
 
 on:
   schedule:
-    - cron: '0 23 * * *'
-    - cron: '0 3 * * *'
-    - cron: '0 11 * * *'
-  workflow_dispatch:
+    - cron: '0 23 * * *'   # 한국 오전 8시 (UTC 23:00 전날)
+    - cron: '0 11 * * *'   # 한국 저녁 8시 (UTC 11:00)
+  workflow_dispatch:        # 수동 실행 버튼 (GitHub에서 클릭으로 즉시 실행)
 
 jobs:
   post:
@@ -25,7 +29,9 @@ jobs:
 
       - name: 자동 포스팅 실행
         env:
-          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          CLAUDE_API_KEY:       ${{ secrets.CLAUDE_API_KEY }}
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
-          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          THREADS_USER_ID:      ${{ secrets.THREADS_USER_ID }}
+          NAVER_CLIENT_ID:      ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET:  ${{ secrets.NAVER_CLIENT_SECRET }}
         run: python threads_auto_poster.py
