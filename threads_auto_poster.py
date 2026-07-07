@@ -213,9 +213,10 @@ def main():
     print(f"🤖 꿀템연구소 텍스트 포스팅 시작: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*52}\n")
 
-    # 날짜 기반 카테고리 순환
-    cat = CATEGORIES[datetime.now().day % len(CATEGORIES)]
-    print(f"📂 카테고리: {cat['name']}")
+    # 날짜+시간 기반 카테고리 순환 (8시간마다 변경 → 하루 3번 포스팅이 모두 다른 카테고리)
+    now = datetime.now()
+    cat = CATEGORIES[(now.day + now.hour // 8) % len(CATEGORIES)]
+    print(f"📂 카테고리: {cat['name']} (날짜:{now.day} 시간대:{now.hour//8})")
 
     # 1. 네이버 쇼핑 실제 상품 수집
     print("\n🛍️  네이버 쇼핑 상품 수집 중...")
