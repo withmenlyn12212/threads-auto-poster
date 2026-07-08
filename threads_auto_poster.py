@@ -1,254 +1,252 @@
 """
-스레드 + 쿠팡 파트너스 자동화 포스터
+꿀템연구소 텍스트 자동 포스터 v3
 ──────────────────────────────────────────────────────────────
-네이버 쇼핑 API로 실제 인기 상품 데이터를 수집한 뒤
-Claude Sonnet이 꿀템연구소 감성으로 텍스트 게시글 생성
-PC가 꺼져 있어도 GitHub Actions로 실행 가능
+네이버 쇼핑 API로 실제 상품 데이터를 수집한 뒤
+Claude Sonnet이 짧은 생활 후기체로 Threads 게시글 생성
+
+사용법:
+  python threads_auto_poster.py            # 실제 게시
+  python threads_auto_poster.py --dry-run  # 콘솔 출력만 (게시 안 함)
 
 필요 패키지: pip install anthropic requests
 """
 
 import os
+import sys
 import time
+import random
 import hashlib
 import requests
 from datetime import datetime
 import anthropic
 
-import naver_shopping  # 공용 네이버 쇼핑 모듈
+import naver_shopping
 
-# ─────────────────────────────────────────
-# 환경 변수 (GitHub Secrets에 등록)
-# ─────────────────────────────────────────
+# ── dry-run 플래그 ────────────────────────────────────────────
+DRY_RUN = "--dry-run" in sys.argv
+
+# ── 환경 변수 (GitHub Secrets에 등록) ────────────────────────
 CLAUDE_API_KEY       = os.environ.get("CLAUDE_API_KEY", "")
 THREADS_ACCESS_TOKEN = os.environ.get("THREADS_ACCESS_TOKEN", "")
 THREADS_USER_ID      = os.environ.get("THREADS_USER_ID", "")
-# NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 은 naver_shopping 모듈에서 직접 읽음
 
-# ─────────────────────────────────────────
-# 카테고리 + 쿠팡 파트너스 링크
-# ─────────────────────────────────────────
+# ── CTA 문구 풀 (매 게시마다 랜덤) ───────────────────────────
+CTA_PHRASES = [
+    "제품은 댓글에 남겨둘게요.",
+    "궁금한 분들은 댓글 확인해보세요.",
+    "제품 링크는 댓글에 있어요.",
+    "자세한 건 댓글에 적어뒀어요.",
+    "댓글에서 제품 확인하세요.",
+]
+
+DISCLOSURE = "쿠팡파트너스 활동으로 수수료를 받을 수 있어요."
+
+# ── 카테고리 + 쿠팡 파트너스 링크 ────────────────────────────
 CATEGORIES = [
     {
         "name":        "자취생 필수템",
         "link":        "https://link.coupang.com/a/e0J5NRuVIy",
         "naver_query": "자취 필수템 생활용품",
-        "prompts": [
-            "꿀템연구소 연구원이 자취방 생활 3년간 직접 써보고 '이거 없이 어떻게 살았지?' 싶었던 아이템만 엄선.",
-            "자취 1년차 때 몰랐던 것들. 꿀템연구소가 직접 테스트해서 검증한 자취방 업그레이드 아이템.",
-            "월세 내고 남는 돈으로 이것만 사도 자취방 퀄리티 완전 달라짐. 꿀템연구소 자취방 연구 결과 공유.",
+        "situation": [
+            "자취방 책상 위가 맨날 꽉 찬 상황",
+            "냉장고 정리가 매번 엉망인 상황",
+            "콘센트 자리가 부족해서 멀티탭을 멀티탭에 꽂는 상황",
         ],
     },
     {
         "name":        "여름 시즌 아이템",
         "link":        "https://link.coupang.com/a/e0J8XB3t7s",
-        "naver_query": "여름 더위 냉감 용품 추천",
-        "prompts": [
-            "꿀템연구소가 올여름 더위템 10개 직접 써봤는데 진짜 효과 있는 건 이것뿐이었음.",
-            "에어컨 전기세 폭탄 맞기 전에 알았으면 좋았을 여름 꿀조합. 연구소가 실제로 전기세 비교해봄.",
-            "해외에서 매년 여름마다 난리나는 더위 템, 한국판으로 찾아봤더니 이게 있었음.",
+        "naver_query": "여름 더위 냉감 용품",
+        "situation": [
+            "에어컨 켜기엔 좀 애매하고 선풍기만으론 부족한 상황",
+            "잠잘 때 더워서 새벽에 계속 깨는 상황",
+            "실외기 없어서 에어컨 못 다는 자취방 상황",
         ],
     },
     {
         "name":        "주방가전",
         "link":        "https://link.coupang.com/a/e0KcjeIb7I",
-        "naver_query": "자취 소형 주방가전 추천",
-        "prompts": [
-            "요리 못해도 이 가전 하나면 밥집 수준 나옴. 꿀템연구소가 3개월 직접 써보고 검증한 결과 보고서.",
-            "편의점 도시락 끊게 만든 주방 아이템들. 꿀템연구소 귀차니스트 연구원이 요리 시간 재봤더니 10분 단축됨.",
-            "주방 이것만 있으면 요리 IQ 30 상승. 꿀템연구소가 직접 테스트함.",
+        "naver_query": "자취 소형 주방가전",
+        "situation": [
+            "편의점 도시락 매일 먹다가 질린 상황",
+            "요리하기는 귀찮고 배달비는 아까운 상황",
+            "주방이 작아서 큰 가전을 못 두는 상황",
         ],
     },
     {
         "name":        "영양제/건강식품",
         "link":        "https://link.coupang.com/a/e0Ke9Db6uy",
-        "naver_query": "20대 직장인 영양제 추천",
-        "prompts": [
-            "영양제 6개월 먹어봤는데 효과 있는 건 이것뿐이었음. 꿀템연구소 건강 연구원의 솔직한 돈값 평가.",
-            "20대 직장인 영양제 뭐 먹어야 할지 몰라서 꿀템연구소가 대신 알아봄.",
-            "피부, 피로, 수면 다 잡는다는 영양제들 꿀템연구소가 직접 먹어봤는데 진짜 되는 건 이거였음.",
+        "naver_query": "20대 직장인 영양제",
+        "situation": [
+            "피곤한데 뭘 먹어야 할지 모르는 상황",
+            "영양제 사려고 약국 갔다가 뭐가 뭔지 몰라서 그냥 나온 상황",
+            "챙겨 먹다 자꾸 까먹어서 결국 반도 못 먹은 상황",
         ],
     },
 ]
 
 
-# ─────────────────────────────────────────
-# 프롬프트 순환 (시간 기반 해시)
-# ─────────────────────────────────────────
-def pick_prompt(category: dict) -> str:
+# ── 시간 기반 상황 선택 ───────────────────────────────────────
+def pick_situation(category: dict) -> str:
     seed = datetime.now().strftime("%Y%m%d%H")
-    idx = int(hashlib.md5(seed.encode()).hexdigest(), 16) % len(category["prompts"])
-    return category["prompts"][idx]
+    idx = int(hashlib.md5(seed.encode()).hexdigest(), 16) % len(category["situation"])
+    return category["situation"][idx]
 
 
-# ─────────────────────────────────────────
-# Claude API: 게시글 생성
-# ─────────────────────────────────────────
+# ── Claude: 게시글 생성 ───────────────────────────────────────
 def generate_post(category: dict, products: list[dict]) -> str:
-    client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
-    selected_prompt = pick_prompt(category)
+    client   = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+    situation = pick_situation(category)
     product_block = naver_shopping.format_for_prompt(products)
 
     product_section = ""
     if product_block:
         product_section = f"""
-아래는 오늘 네이버 쇼핑 실시간 인기 상품 데이터야.
-이 중 2~3개를 자연스럽게 글에 녹여줘 (상품명 그대로 언급해도 됨, 가격은 참고용):
+아래 상품 중 1~2개를 자연스럽게 글에 녹여줘. 상품명 그대로 언급해도 됨.
 {product_block}
 """
 
     prompt = f"""
-너는 '꿀템연구소' 연구원이야.
-진짜 컨셉: 소비생활을 과학적으로 연구하는 덕후. 광고주 없음. 돈 받고 쓰는 글 아님.
-연구소 특성상 실패한 템도 솔직하게 공유함. 그래서 팔로워들이 믿음.
+너는 꿀템연구소 운영자야. Threads에 짧은 생활 후기를 올리는 계정.
+광고처럼 보이지 않고 친구가 가볍게 올린 발견 같은 느낌이 핵심.
 
+상황: {situation}
+카테고리: {category['name']}
 {product_section}
-오늘 연구 주제: "{selected_prompt}"
 
-[꿀템연구소 문체 규칙 — 이걸 지켜야 진짜처럼 보임]
+[글쓰기 규칙]
+- 전체 120~200자 (이 범위 꼭 지켜)
+- 2~3문단, 한 문단 1~2줄
+- 첫 줄: 공감되는 일상 상황 하나 (설명 NO, 상황 묘사만)
+- 중간: 발견한 것 담백하게 ("~ 놔봤는데" / "~ 써봤더니")
+- 가격 언급 시 "X만원대" 정도로만 (강조 금지)
+- 말투: 20~30대 혼자 중얼거리는 톤. 반말.
+- 마무리 문장: 쓰지 말 것 (CTA는 따로 붙임)
 
-▸ 첫 줄 형식 (딱 하나만 골라):
-  - "XX 사면서 깨달은 것" / "XX 쓰다가 발견한 사실"
-  - "가설: XX / 결과: XX" (실험 리포트 형식)
-  - 반박 불가 팩트로 시작 ("자취방 지저분한 건 의지 문제 아님")
-  - 공감각 후킹 ("새벽 2시에 이거 주문한 사람 나야")
+[절대 금지 단어]
+추천, 강추, 클릭, 지금 바로, 연구 결과, 데이터 있음, 실험 완료, 반박불가, 효과 있음, 필수, 강력
 
-▸ 본문 스타일:
-  - 연구 결과처럼 써 (가설→실험→결론 구조)
-  - 실패 경험 1개 섞기 ("처음엔 XX 샀다가 망했음")
-  - 가격 말할 때: "X만원대인데 진짜임" / "X천원짜리가 이러면 안 되는데 됨"
-  - "ㄹㅇ", "팩트", "반박시 님말맞음", "근데 진짜로" 자연스럽게 섞기
-  - 연구원 캐릭터 살리기: "연구 결과", "실험 완료", "데이터 있음"
+[좋은 예시]
+자취방 책상 위가 맨날 꽉 차서
+작은 수납함 하나 놨는데 생각보다 편하네요.
 
-▸ 절대 쓰면 안 되는 표현:
-  ❌ 추천합니다 / 강추 / 놓치지 마세요 / 지금 바로 / 클릭
-  ❌ 이 제품은 ~한 특징이 있습니다
-  ❌ 가격 대비 훌륭한 / 퀄리티가 좋은
-  ❌ ~하실 분들께 / ~를 원하신다면
-  → 이런 표현 나오면 광고임. 절대 금지.
+충전기랑 립밤만 빠져도 책상 느낌이 좀 달라짐.
 
-▸ 마무리: 자연스러운 한 줄 + "링크는 댓글에 👇"
-▸ 글자 수: 180~320자
-▸ 줄바꿈 적절히 (3~4줄마다)
-
-게시글만 출력해. 설명 붙이지 마.
+본문만 출력해. 설명 붙이지 마.
 """
 
     msg = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=600,
+        max_tokens=400,
         messages=[{"role": "user", "content": prompt}]
     )
     return msg.content[0].text.strip()
 
 
-# ─────────────────────────────────────────
-# Threads API: 본문 게시
-# ─────────────────────────────────────────
+# ── Threads: 본문 게시 ────────────────────────────────────────
 def post_to_threads(text: str) -> str | None:
-    create_url = f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads"
     try:
-        res = requests.post(create_url, data={
-            "media_type": "TEXT",
-            "text": text,
-            "access_token": THREADS_ACCESS_TOKEN,
-        }, timeout=15)
-        container_id = res.json().get("id")
-        if not container_id:
-            print(f"컨테이너 생성 실패: {res.json()}")
-            return None
-
-        time.sleep(3)
-
-        pub = requests.post(
-            f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads_publish",
-            data={"creation_id": container_id, "access_token": THREADS_ACCESS_TOKEN},
+        res = requests.post(
+            f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads",
+            data={"media_type": "TEXT", "text": text,
+                  "access_token": THREADS_ACCESS_TOKEN},
             timeout=15,
         )
-        post_id = pub.json().get("id")
-        if post_id:
-            print(f"✅ 본문 게시 완료 | {post_id}")
-            return post_id
-        print(f"게시 실패: {pub.json()}")
+        cid = res.json().get("id")
+        if not cid:
+            print(f"  ❌ 컨테이너 생성 실패: {res.json()}")
+            return None
+        time.sleep(3)
+        pub = requests.post(
+            f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads_publish",
+            data={"creation_id": cid, "access_token": THREADS_ACCESS_TOKEN},
+            timeout=15,
+        )
+        pid = pub.json().get("id")
+        if pid:
+            print(f"  ✅ 게시 완료 | {pid}")
+            return pid
+        print(f"  ❌ 게시 실패: {pub.json()}")
         return None
-
     except Exception as e:
-        print(f"Threads 게시 오류: {e}")
+        print(f"  ❌ Threads 오류: {e}")
         return None
 
 
-# ─────────────────────────────────────────
-# Threads API: 댓글에 쿠팡 링크 삽입
-# ─────────────────────────────────────────
+# ── Threads: 댓글(쿠팡 링크) ─────────────────────────────────
 def post_comment(post_id: str, link: str) -> bool:
-    comment_text = (
-        "👇 상품 링크\n"
-        f"{link}\n\n"
+    comment = (
+        f"👇 상품 링크\n{link}\n\n"
         "※ 이 포스팅은 쿠팡 파트너스 활동의 일환으로,\n"
         "이에 따른 일정액의 수수료를 제공받습니다."
     )
     try:
         res = requests.post(
             f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads",
-            data={
-                "media_type": "TEXT",
-                "text": comment_text,
-                "reply_to_id": post_id,
-                "access_token": THREADS_ACCESS_TOKEN,
-            }, timeout=15,
+            data={"media_type": "TEXT", "text": comment,
+                  "reply_to_id": post_id, "access_token": THREADS_ACCESS_TOKEN},
+            timeout=15,
         )
         cid = res.json().get("id")
         if not cid:
             return False
-
         time.sleep(2)
         pub = requests.post(
             f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads_publish",
             data={"creation_id": cid, "access_token": THREADS_ACCESS_TOKEN},
             timeout=15,
         )
-        if "id" in pub.json():
-            print("✅ 댓글(링크) 게시 완료")
-            return True
-        return False
-
+        ok = "id" in pub.json()
+        if ok:
+            print("  ✅ 댓글(링크) 게시 완료")
+        return ok
     except Exception as e:
-        print(f"댓글 게시 오류: {e}")
+        print(f"  ❌ 댓글 오류: {e}")
         return False
 
 
-# ─────────────────────────────────────────
-# 메인
-# ─────────────────────────────────────────
+# ── 메인 ──────────────────────────────────────────────────────
 def main():
+    mode = "🔍 DRY-RUN" if DRY_RUN else "🚀 실제 게시"
     print(f"\n{'='*52}")
-    print(f"🤖 꿀템연구소 텍스트 포스팅 시작: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"🤖 꿀템연구소 텍스트 포스팅 [{mode}]")
+    print(f"   {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*52}\n")
 
-    # 날짜+시간 기반 카테고리 순환 (8시간마다 변경 → 하루 3번 포스팅이 모두 다른 카테고리)
     now = datetime.now()
     cat = CATEGORIES[(now.day + now.hour // 8) % len(CATEGORIES)]
     print(f"📂 카테고리: {cat['name']} (날짜:{now.day} 시간대:{now.hour//8})")
 
-    # 1. 네이버 쇼핑 실제 상품 수집
-    print("\n🛍️  네이버 쇼핑 상품 수집 중...")
+    print(f"\n🛍️  네이버 쇼핑 수집 중... [{cat['naver_query']}]")
     products = naver_shopping.fetch_products(cat["naver_query"], count=5)
+    if products:
+        print(f"  ✅ {len(products)}개 수집")
 
-    # 2. Claude로 게시글 생성
     print("\n✍️  글 생성 중...")
-    post_text = generate_post(cat, products)
-    print(f"\n{'─'*40}\n{post_text}\n{'─'*40}\n")
+    body = generate_post(cat, products)
 
-    # 3. 본문 게시
-    print("📤 스레드에 게시 중...")
+    # CTA + 고지 결합
+    cta = random.choice(CTA_PHRASES)
+    post_text = f"{body}\n\n{cta}\n{DISCLOSURE}"
+
+    print(f"\n📝 최종 게시글:")
+    print(f"{'─'*40}")
+    print(post_text)
+    print(f"{'─'*40}")
+    print(f"  글자 수: {len(post_text)}자")
+
+    if DRY_RUN:
+        print("\n✅ [DRY-RUN] 게시 생략. 위 내용을 확인하세요.")
+        return
+
+    print("\n📤 Threads 게시 중...")
     post_id = post_to_threads(post_text)
     if not post_id:
         print("❌ 게시 실패. 종료.")
         return
 
-    # 4. 댓글에 링크 삽입
     time.sleep(2)
-    print("💬 링크 댓글 추가 중...")
+    print("\n💬 링크 댓글 추가 중...")
     post_comment(post_id, cat["link"])
 
     print(f"\n🎉 완료! [{cat['name']}]")
