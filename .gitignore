@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.env
+venv/
+
+# 생성된 웹툰 결과물 (전체 보관)
+generated_comics/*/private_product.json
+generated_comics/*/public_story_input.json
+
+# 개발용 dry-run 이미지
+dry_run_*.png
+
+# OS
+.DS_Store
+Thumbs.db
